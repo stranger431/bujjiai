@@ -1,4 +1,4 @@
-import 'dart0:async';
+import 'dart:async';
 import 'dart:convert';
 import 'package:flutter/material.dart';
 import 'package:flutter_tts/flutter_tts.dart';
@@ -128,7 +128,6 @@ class _BujjiHomeScreenState extends State<BujjiHomeScreen> {
 
   Future<void> _initTts() async {
     await _flutterTts.setLanguage("te-IN");
-    // స్పీడ్ తగ్గించి సాధారణ సంభాషణ వేగానికి పెట్టాం
     await _flutterTts.setSpeechRate(0.45);
     await _flutterTts.setPitch(1.1);
 
