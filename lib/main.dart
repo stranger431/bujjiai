@@ -25,7 +25,7 @@ class BujjiApp extends StatelessWidget {
   }
 }
 
-// 1. API Key & Settings Setup Screen
+// 1. API Key Setup Screen
 class ApiKeyCheckScreen extends StatefulWidget {
   const ApiKeyCheckScreen({super.key});
 
@@ -249,7 +249,7 @@ class _BujjiHomeScreenState extends State<BujjiHomeScreen> {
 
   Future<void> _initTts() async {
     await _flutterTts.setLanguage("te-IN");
-    await _flutterTts.setSpeechRate(0.45);
+    await _flutterTts.setSpeechRate(0.52);
     await _flutterTts.setPitch(1.1);
 
     _flutterTts.setStartHandler(() {
@@ -280,12 +280,18 @@ class _BujjiHomeScreenState extends State<BujjiHomeScreen> {
         if (status == 'notListening' || status == 'done') {
           if (mounted) {
             setState(() => _isListening = false);
+            if (_isSleepMode) {
+              _startWakeWordListening();
+            }
           }
         }
       },
       onError: (error) {
         if (mounted) {
           setState(() => _isListening = false);
+          if (_isSleepMode) {
+            _startWakeWordListening();
+          }
         }
       },
     );
@@ -312,9 +318,12 @@ class _BujjiHomeScreenState extends State<BujjiHomeScreen> {
       setState(() {
         _isSleepMode = true;
         _isListening = false;
-        _statusText = "పడుకున్నా బాలా... (స్క్రీన్‌పై లేదా WAKE UP నొక్కు)";
+        _statusText = "పడుకున్నా బాలా... ('బుజ్జి' లేదా 'Hi Bujji' అను)";
       });
     }
+    Future.delayed(const Duration(milliseconds: 300), () {
+      _startWakeWordListening();
+    });
   }
 
   void _wakeUp() {
@@ -327,6 +336,34 @@ class _BujjiHomeScreenState extends State<BujjiHomeScreen> {
     }
     _resetSleepTimer();
     _speak("హలో బాలా! లేచేశాను, చెప్పు ఏమిటి విశేషాలు?");
+  }
+
+  void _startWakeWordListening() async {
+    if (!_isSleepMode || _isSpeaking) return;
+
+    if (!_isSpeechInitialized) {
+      _isSpeechInitialized = await _speech.initialize();
+    }
+
+    if (_isSpeechInitialized && !_speech.isListening) {
+      _speech.listen(
+        onResult: (result) {
+          String text = result.recognizedWords.toLowerCase();
+          if (text.contains("bujji") ||
+              text.contains("బుజ్జి") ||
+              text.contains("hi") ||
+              text.contains("oy") ||
+              text.contains("bala") ||
+              text.contains("బాలా")) {
+            _wakeUp();
+          }
+        },
+        listenFor: const Duration(seconds: 20),
+        pauseFor: const Duration(seconds: 3),
+        listenMode: stt.ListenMode.dictation,
+        partialResults: true,
+      );
+    }
   }
 
   void _startListening() async {
@@ -351,6 +388,7 @@ class _BujjiHomeScreenState extends State<BujjiHomeScreen> {
         },
         listenFor: const Duration(seconds: 12),
         pauseFor: const Duration(seconds: 4),
+        listenMode: stt.ListenMode.dictation,
         localeId: "te_IN",
       );
     }
