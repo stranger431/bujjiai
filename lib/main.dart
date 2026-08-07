@@ -19,75 +19,110 @@ class BujjiApp extends StatelessWidget {
       title: 'Bujji AI Robot',
       debugShowCheckedModeBanner: false,
       theme: ThemeData.dark(),
-      home: const ApiKeyScreen(),
+      home: const ApiKeyCheckScreen(),
     );
   }
 }
 
-class ApiKeyScreen extends StatefulWidget {
-  const ApiKeyScreen({super.key});
+// 1. API Key Check Screen
+class ApiKeyCheckScreen extends StatefulWidget {
+  const ApiKeyCheckScreen({super.key});
 
   @override
-  State<ApiKeyScreen> createState() => _ApiKeyScreenState();
+  State<ApiKeyCheckScreen> createState() => _ApiKeyCheckScreenState();
 }
 
-class _ApiKeyScreenState extends State<ApiKeyScreen> {
+class _ApiKeyCheckScreenState extends State<ApiKeyCheckScreen> {
   final TextEditingController _apiKeyController = TextEditingController();
+  final TextEditingController _promptController = TextEditingController();
+
+  final String _defaultPrompt =
+      "Your name is Bujji. You are a witty, mischievous, very smart, and loving AI robot friend created by Bala. Speak in natural Telugu script. Be friendly and playful. Keep short answers for normal chat, but explain well if Bala asks for stories or long topics.";
 
   @override
   void initState() {
     super.initState();
-    _checkSavedApiKey();
+    _checkSavedSettings();
   }
 
-  Future<void> _checkSavedApiKey() async {
+  Future<void> _checkSavedSettings() async {
     final prefs = await SharedPreferences.getInstance();
     final savedKey = prefs.getString('groq_api_key');
+    final savedPrompt = prefs.getString('bujji_system_prompt') ?? _defaultPrompt;
+
     if (savedKey != null && savedKey.isNotEmpty) {
-      _navigateToMain(savedKey);
+      _navigateToHome(savedKey, savedPrompt);
+    } else {
+      _promptController.text = savedPrompt;
     }
   }
 
   void _saveAndProceed() async {
     final key = _apiKeyController.text.trim();
+    final prompt = _promptController.text.trim().isNotEmpty
+        ? _promptController.text.trim()
+        : _defaultPrompt;
+
     if (key.isNotEmpty) {
       final prefs = await SharedPreferences.getInstance();
       await prefs.setString('groq_api_key', key);
-      _navigateToMain(key);
+      await prefs.setString('bujji_system_prompt', prompt);
+      _navigateToHome(key, prompt);
     }
   }
 
-  void _navigateToMain(String key) {
+  void _navigateToHome(String key, String prompt) {
     Navigator.of(context).pushReplacement(
-      MaterialPageRoute(builder: (context) => BujjiHomeScreen(apiKey: key)),
+      MaterialPageRoute(
+        builder: (context) => BujjiHomeScreen(apiKey: key, systemPrompt: prompt),
+      ),
     );
   }
 
   @override
   Widget build(BuildContext context) {
     return Scaffold(
-      body: Center(
+      appBar: AppBar(title: const Text('BUJJI SETUP'), centerTitle: true),
+      body: SingleChildScrollView(
         child: Padding(
           padding: const EdgeInsets.all(24.0),
           child: Column(
             mainAxisAlignment: MainAxisAlignment.center,
             children: [
-              const Text(
-                'BUJJI AI',
-                style: TextStyle(fontSize: 28, fontWeight: FontWeight.bold, color: Colors.cyanAccent),
-              ),
               const SizedBox(height: 20),
+              const Text(
+                'BUJJI AI ROBOT',
+                style: TextStyle(
+                    fontSize: 26, fontWeight: FontWeight.bold, color: Colors.cyanAccent),
+              ),
+              const SizedBox(height: 30),
               TextField(
                 controller: _apiKeyController,
                 decoration: const InputDecoration(
                   labelText: 'Enter Groq API Key',
                   border: OutlineInputBorder(),
+                  hintText: 'gsk_...',
                 ),
               ),
               const SizedBox(height: 20),
+              TextField(
+                controller: _promptController,
+                maxLines: 4,
+                decoration: const InputDecoration(
+                  labelText: 'Bujji Personality / System Prompt',
+                  border: OutlineInputBorder(),
+                ),
+              ),
+              const SizedBox(height: 30),
               ElevatedButton(
                 onPressed: _saveAndProceed,
-                child: const Text('Save & Start'),
+                style: ElevatedButton.styleFrom(
+                  backgroundColor: Colors.cyanAccent,
+                  foregroundColor: Colors.black,
+                  padding: const EdgeInsets.symmetric(horizontal: 40, vertical: 15),
+                ),
+                child: const Text('START BUJJI',
+                    style: TextStyle(fontSize: 16, fontWeight: FontWeight.bold)),
               ),
             ],
           ),
@@ -97,9 +132,94 @@ class _ApiKeyScreenState extends State<ApiKeyScreen> {
   }
 }
 
+// 2. Settings Screen
+class SettingsScreen extends StatefulWidget {
+  final String currentKey;
+  final String currentPrompt;
+
+  const SettingsScreen({super.key, required this.currentKey, required this.currentPrompt});
+
+  @override
+  State<SettingsScreen> createState() => _SettingsScreenState();
+}
+
+class _SettingsScreenState extends State<SettingsScreen> {
+  late TextEditingController _keyController;
+  late TextEditingController _promptController;
+
+  @override
+  void initState() {
+    super.initState();
+    _keyController = TextEditingController(text: widget.currentKey);
+    _promptController = TextEditingController(text: widget.currentPrompt);
+  }
+
+  void _updateSettings() async {
+    final newKey = _keyController.text.trim();
+    final newPrompt = _promptController.text.trim();
+
+    if (newKey.isNotEmpty && newPrompt.isNotEmpty) {
+      final prefs = await SharedPreferences.getInstance();
+      await prefs.setString('groq_api_key', newKey);
+      await prefs.setString('bujji_system_prompt', newPrompt);
+
+      if (mounted) {
+        Navigator.of(context).pushAndRemoveUntil(
+          MaterialPageRoute(
+            builder: (context) => BujjiHomeScreen(apiKey: newKey, systemPrompt: newPrompt),
+          ),
+          (route) => false,
+        );
+      }
+    }
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return Scaffold(
+      appBar: AppBar(title: const Text('Bujji Settings')),
+      body: Padding(
+        padding: const EdgeInsets.all(20.0),
+        child: Column(
+          children: [
+            TextField(
+              controller: _keyController,
+              decoration: const InputDecoration(
+                labelText: 'Groq API Key',
+                border: OutlineInputBorder(),
+              ),
+            ),
+            const SizedBox(height: 20),
+            TextField(
+              controller: _promptController,
+              maxLines: 5,
+              decoration: const InputDecoration(
+                labelText: 'Bujji Personality Prompt',
+                border: OutlineInputBorder(),
+              ),
+            ),
+            const SizedBox(height: 30),
+            ElevatedButton(
+              onPressed: _updateSettings,
+              style: ElevatedButton.styleFrom(
+                backgroundColor: Colors.cyanAccent,
+                foregroundColor: Colors.black,
+              ),
+              child: const Text('SAVE & UPDATE BUJJI'),
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+}
+
+// 3. Main Bujji Home Screen
 class BujjiHomeScreen extends StatefulWidget {
   final String apiKey;
-  const BujjiHomeScreen({super.key, required this.apiKey});
+  final String systemPrompt;
+
+  const BujjiHomeScreen({super.key, required this.apiKey, required this.systemPrompt});
 
   @override
   State<BujjiHomeScreen> createState() => _BujjiHomeScreenState();
@@ -110,6 +230,7 @@ class _BujjiHomeScreenState extends State<BujjiHomeScreen> {
   late FlutterTts _flutterTts;
 
   bool _isListening = false;
+  bool _isSpeaking = false;
   bool _isSleepMode = false;
   String _statusText = "లేచేశా బాలా!";
   Timer? _sleepTimer;
@@ -131,7 +252,14 @@ class _BujjiHomeScreenState extends State<BujjiHomeScreen> {
     await _flutterTts.setSpeechRate(0.45);
     await _flutterTts.setPitch(1.1);
 
+    _flutterTts.setStartHandler(() {
+      setState(() => _isSpeaking = true);
+      _sleepTimer?.cancel();
+    });
+
     _flutterTts.setCompletionHandler(() {
+      setState(() => _isSpeaking = false);
+      _resetSleepTimer();
       if (!_isSleepMode) {
         _startListening();
       }
@@ -142,15 +270,13 @@ class _BujjiHomeScreenState extends State<BujjiHomeScreen> {
     await _speech.initialize(
       onStatus: (status) {
         if (status == 'notListening') {
-          setState(() {
-            _isListening = false;
-          });
+          setState(() => _isListening = false);
           if (_isSleepMode) {
             _startWakeWordListening();
           }
         }
       },
-      onError: (errorNotification) {
+      onError: (error) {
         if (_isSleepMode) {
           _startWakeWordListening();
         }
@@ -160,8 +286,12 @@ class _BujjiHomeScreenState extends State<BujjiHomeScreen> {
 
   void _resetSleepTimer() {
     _sleepTimer?.cancel();
+    if (_isSpeaking) return;
+
     _sleepTimer = Timer(const Duration(seconds: 30), () {
-      _enterSleepMode();
+      if (!_isSpeaking) {
+        _enterSleepMode();
+      }
     });
   }
 
@@ -186,24 +316,26 @@ class _BujjiHomeScreenState extends State<BujjiHomeScreen> {
   }
 
   void _startWakeWordListening() {
-    if (_isSleepMode && !_speech.isListening) {
+    if (_isSleepMode && !_speech.isListening && !_isSpeaking) {
       _speech.listen(
         onResult: (result) {
           String text = result.recognizedWords.toLowerCase();
-          if (text.contains("bujji") || text.contains("బుజ్జి") || text.contains("hi")) {
+          if (text.contains("bujji") ||
+              text.contains("బుజ్జి") ||
+              text.contains("hi") ||
+              text.contains("oy")) {
             _wakeUp();
           }
         },
-        listenFor: const Duration(seconds: 30),
+        listenFor: const Duration(seconds: 20),
         pauseFor: const Duration(seconds: 3),
         partialResults: true,
-        listenMode: stt.ListenMode.dictation,
       );
     }
   }
 
   void _startListening() async {
-    if (_isSleepMode) return;
+    if (_isSleepMode || _isSpeaking) return;
     _resetSleepTimer();
 
     if (!_speech.isListening) {
@@ -254,10 +386,7 @@ class _BujjiHomeScreenState extends State<BujjiHomeScreen> {
         body: jsonEncode({
           "model": "llama-3.3-70b-versatile",
           "messages": [
-            {
-              "role": "system",
-              "content": "You are Bujji, a funny, witty, Telugu speaking AI robot friend created by Bala. Speak naturally in simple conversational Telugu script with humor."
-            },
+            {"role": "system", "content": widget.systemPrompt},
             ..._messages
           ],
         }),
@@ -267,7 +396,7 @@ class _BujjiHomeScreenState extends State<BujjiHomeScreen> {
         final data = jsonDecode(utf8.decode(response.bodyBytes));
         return data['choices'][0]['message']['content'];
       } else {
-        return "అయ్యో బాలా! చిన్న సమస్య వచ్చింది.";
+        return "అయ్యో బాలా! చిన్న సమస్య వచ్చింది, కీ సరిచూడు.";
       }
     } catch (e) {
       return "నెట్‌వర్క్ చెక్ చేసుకో బాలా!";
@@ -291,14 +420,29 @@ class _BujjiHomeScreenState extends State<BujjiHomeScreen> {
   Widget build(BuildContext context) {
     return Scaffold(
       backgroundColor: Colors.black,
+      appBar: AppBar(
+        backgroundColor: Colors.black,
+        title: const Text('BUJJI AI', style: TextStyle(color: Colors.cyanAccent)),
+        centerTitle: true,
+        actions: [
+          IconButton(
+            icon: const Icon(Icons.settings, color: Colors.cyanAccent),
+            onPressed: () {
+              Navigator.of(context).push(
+                MaterialPageRoute(
+                  builder: (context) => SettingsScreen(
+                    currentKey: widget.apiKey,
+                    currentPrompt: widget.systemPrompt,
+                  ),
+                ),
+              );
+            },
+          ),
+        ],
+      ),
       body: SafeArea(
         child: Column(
           children: [
-            const SizedBox(height: 20),
-            const Text(
-              'BUJJI AI',
-              style: TextStyle(fontSize: 22, fontWeight: FontWeight.bold, color: Colors.white70),
-            ),
             const Spacer(),
             Center(
               child: GestureDetector(
@@ -314,14 +458,17 @@ class _BujjiHomeScreenState extends State<BujjiHomeScreen> {
                   height: 220,
                   decoration: BoxDecoration(
                     shape: BoxShape.circle,
-                    border: Border.all(color: _isSleepMode ? Colors.grey : Colors.cyanAccent, width: 4),
+                    border: Border.all(
+                        color: _isSleepMode ? Colors.grey : Colors.cyanAccent, width: 4),
                   ),
                   child: Row(
                     mainAxisAlignment: MainAxisAlignment.center,
                     children: [
-                      CircleAvatar(radius: _isSleepMode ? 4 : 12, backgroundColor: Colors.cyanAccent),
+                      CircleAvatar(
+                          radius: _isSleepMode ? 4 : 12, backgroundColor: Colors.cyanAccent),
                       const SizedBox(width: 40),
-                      CircleAvatar(radius: _isSleepMode ? 4 : 12, backgroundColor: Colors.cyanAccent),
+                      CircleAvatar(
+                          radius: _isSleepMode ? 4 : 12, backgroundColor: Colors.cyanAccent),
                     ],
                   ),
                 ),
