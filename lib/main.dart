@@ -7,6 +7,7 @@ import 'package:speech_to_text/speech_to_text.dart' as stt;
 import 'package:shared_preferences/shared_preferences.dart';
 
 void main() {
+  WidgetsFlutterBinding.ensureInitialized();
   runApp(const BujjiApp());
 }
 
@@ -24,7 +25,7 @@ class BujjiApp extends StatelessWidget {
   }
 }
 
-// 1. API Key Check Screen
+// 1. API Key & Settings Setup Screen
 class ApiKeyCheckScreen extends StatefulWidget {
   const ApiKeyCheckScreen({super.key});
 
@@ -226,9 +227,10 @@ class BujjiHomeScreen extends StatefulWidget {
 }
 
 class _BujjiHomeScreenState extends State<BujjiHomeScreen> {
-  late stt.SpeechToText _speech;
-  late FlutterTts _flutterTts;
+  final stt.SpeechToText _speech = stt.SpeechToText();
+  final FlutterTts _flutterTts = FlutterTts();
 
+  bool _isSpeechInitialized = false;
   bool _isListening = false;
   bool _isSpeaking = false;
   bool _isSleepMode = false;
@@ -240,10 +242,8 @@ class _BujjiHomeScreenState extends State<BujjiHomeScreen> {
   @override
   void initState() {
     super.initState();
-    _speech = stt.SpeechToText();
-    _flutterTts = FlutterTts();
     _initTts();
-    _initSpeech();
+    _initSpeechOnce();
     _resetSleepTimer();
   }
 
@@ -253,43 +253,53 @@ class _BujjiHomeScreenState extends State<BujjiHomeScreen> {
     await _flutterTts.setPitch(1.1);
 
     _flutterTts.setStartHandler(() {
-      setState(() => _isSpeaking = true);
+      if (mounted) {
+        setState(() => _isSpeaking = true);
+      }
       _sleepTimer?.cancel();
     });
 
     _flutterTts.setCompletionHandler(() {
-      setState(() => _isSpeaking = false);
+      if (mounted) {
+        setState(() => _isSpeaking = false);
+      }
       _resetSleepTimer();
       if (!_isSleepMode) {
-        _startListening();
+        Future.delayed(const Duration(milliseconds: 500), () {
+          if (mounted && !_isSpeaking && !_isSleepMode) {
+            _startListening();
+          }
+        });
       }
     });
   }
 
-  Future<void> _initSpeech() async {
-    await _speech.initialize(
+  Future<void> _initSpeechOnce() async {
+    _isSpeechInitialized = await _speech.initialize(
       onStatus: (status) {
-        if (status == 'notListening') {
-          setState(() => _isListening = false);
-          if (_isSleepMode) {
-            _startWakeWordListening();
+        if (status == 'notListening' || status == 'done') {
+          if (mounted) {
+            setState(() => _isListening = false);
           }
         }
       },
       onError: (error) {
-        if (_isSleepMode) {
-          _startWakeWordListening();
+        if (mounted) {
+          setState(() => _isListening = false);
         }
       },
     );
+    if (_isSpeechInitialized && mounted) {
+      _startListening();
+    }
   }
 
   void _resetSleepTimer() {
     _sleepTimer?.cancel();
-    if (_isSpeaking) return;
+    if (_isSpeaking || _isSleepMode) return;
 
     _sleepTimer = Timer(const Duration(seconds: 30), () {
-      if (!_isSpeaking) {
+      if (!_isSpeaking && mounted) {
         _enterSleepMode();
       }
     });
@@ -298,79 +308,76 @@ class _BujjiHomeScreenState extends State<BujjiHomeScreen> {
   void _enterSleepMode() {
     _flutterTts.stop();
     _speech.stop();
-    setState(() {
-      _isSleepMode = true;
-      _statusText = "పడుకున్నా బాలా... ('Hi Bujji' అను)";
-    });
-    _startWakeWordListening();
+    if (mounted) {
+      setState(() {
+        _isSleepMode = true;
+        _isListening = false;
+        _statusText = "పడుకున్నా బాలా... (స్క్రీన్‌పై లేదా WAKE UP నొక్కు)";
+      });
+    }
   }
 
   void _wakeUp() {
     _speech.stop();
-    setState(() {
-      _isSleepMode = false;
-      _statusText = "లేచేశా బాలా!";
-    });
+    if (mounted) {
+      setState(() {
+        _isSleepMode = false;
+        _statusText = "లేచేశా బాలా!";
+      });
+    }
     _resetSleepTimer();
     _speak("హలో బాలా! లేచేశాను, చెప్పు ఏమిటి విశేషాలు?");
   }
 
-  void _startWakeWordListening() {
-    if (_isSleepMode && !_speech.isListening && !_isSpeaking) {
+  void _startListening() async {
+    if (_isSleepMode || _isSpeaking) return;
+
+    if (!_isSpeechInitialized) {
+      _isSpeechInitialized = await _speech.initialize();
+    }
+
+    if (_isSpeechInitialized && !_speech.isListening) {
+      setState(() {
+        _isListening = true;
+        _statusText = "వింటున్నా బాలా...";
+      });
+
       _speech.listen(
         onResult: (result) {
-          String text = result.recognizedWords.toLowerCase();
-          if (text.contains("bujji") ||
-              text.contains("బుజ్జి") ||
-              text.contains("hi") ||
-              text.contains("oy")) {
-            _wakeUp();
+          if (result.finalResult) {
+            setState(() => _isListening = false);
+            _processUserQuery(result.recognizedWords);
           }
         },
-        listenFor: const Duration(seconds: 20),
-        pauseFor: const Duration(seconds: 3),
-        partialResults: true,
+        listenFor: const Duration(seconds: 12),
+        pauseFor: const Duration(seconds: 4),
+        localeId: "te_IN",
       );
     }
   }
 
-  void _startListening() async {
-    if (_isSleepMode || _isSpeaking) return;
-    _resetSleepTimer();
-
-    if (!_speech.isListening) {
-      bool available = await _speech.initialize();
-      if (available) {
-        setState(() => _isListening = true);
-        _speech.listen(
-          onResult: (result) {
-            if (result.finalResult) {
-              setState(() => _isListening = false);
-              _processUserQuery(result.recognizedWords);
-            }
-          },
-          listenFor: const Duration(seconds: 10),
-          pauseFor: const Duration(seconds: 3),
-        );
-      }
-    }
-  }
-
   Future<void> _processUserQuery(String userText) async {
-    if (userText.trim().isEmpty) return;
+    if (userText.trim().isEmpty) {
+      _resetSleepTimer();
+      return;
+    }
 
     _resetSleepTimer();
-    setState(() {
-      _messages.add({"role": "user", "content": userText});
-      _statusText = "ఆలోచిస్తున్నా బాలా...";
-    });
+    if (mounted) {
+      setState(() {
+        _messages.add({"role": "user", "content": userText});
+        _statusText = "ఆలోచిస్తున్నా బాలా...";
+      });
+    }
 
     String responseText = await _getGroqResponse(userText);
 
-    setState(() {
-      _messages.add({"role": "assistant", "content": responseText});
-      _statusText = responseText;
-    });
+    if (mounted) {
+      setState(() {
+        _messages.add({"role": "assistant", "content": responseText});
+        _statusText = responseText;
+      });
+    }
 
     _speak(responseText);
   }
@@ -449,7 +456,7 @@ class _BujjiHomeScreenState extends State<BujjiHomeScreen> {
                 onTap: () {
                   if (_isSleepMode) {
                     _wakeUp();
-                  } else {
+                  } else if (!_isSpeaking) {
                     _startListening();
                   }
                 },
@@ -459,16 +466,24 @@ class _BujjiHomeScreenState extends State<BujjiHomeScreen> {
                   decoration: BoxDecoration(
                     shape: BoxShape.circle,
                     border: Border.all(
-                        color: _isSleepMode ? Colors.grey : Colors.cyanAccent, width: 4),
+                      color: _isSleepMode
+                          ? Colors.grey
+                          : (_isListening ? Colors.redAccent : Colors.cyanAccent),
+                      width: 4,
+                    ),
                   ),
                   child: Row(
                     mainAxisAlignment: MainAxisAlignment.center,
                     children: [
                       CircleAvatar(
-                          radius: _isSleepMode ? 4 : 12, backgroundColor: Colors.cyanAccent),
+                        radius: _isSleepMode ? 4 : 12,
+                        backgroundColor: _isListening ? Colors.redAccent : Colors.cyanAccent,
+                      ),
                       const SizedBox(width: 40),
                       CircleAvatar(
-                          radius: _isSleepMode ? 4 : 12, backgroundColor: Colors.cyanAccent),
+                        radius: _isSleepMode ? 4 : 12,
+                        backgroundColor: _isListening ? Colors.redAccent : Colors.cyanAccent,
+                      ),
                     ],
                   ),
                 ),
@@ -497,6 +512,7 @@ class _BujjiHomeScreenState extends State<BujjiHomeScreen> {
               style: ElevatedButton.styleFrom(
                 backgroundColor: Colors.grey[800],
                 foregroundColor: Colors.white,
+                padding: const EdgeInsets.symmetric(horizontal: 30, vertical: 12),
               ),
             ),
             const SizedBox(height: 30),
