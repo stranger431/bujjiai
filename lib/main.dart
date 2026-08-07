@@ -1,4 +1,4 @@
-import 'dart:async';
+import 'dart0:async';
 import 'dart:convert';
 import 'package:flutter/material.dart';
 import 'package:flutter_tts/flutter_tts.dart';
@@ -24,9 +24,6 @@ class BujjiApp extends StatelessWidget {
   }
 }
 
-// -------------------------------------------------------------
-// 1. API Key తీసుకునే స్క్రీన్
-// -------------------------------------------------------------
 class ApiKeyScreen extends StatefulWidget {
   const ApiKeyScreen({super.key});
 
@@ -35,311 +32,328 @@ class ApiKeyScreen extends StatefulWidget {
 }
 
 class _ApiKeyScreenState extends State<ApiKeyScreen> {
-  final TextEditingController _keyController = TextEditingController();
-  bool _isLoading = true;
+  final TextEditingController _apiKeyController = TextEditingController();
 
   @override
   void initState() {
     super.initState();
-    _checkExistingKey();
+    _checkSavedApiKey();
   }
 
-  void _checkExistingKey() async {
-    SharedPreferences prefs = await SharedPreferences.getInstance();
-    String? savedKey = prefs.getString('groq_api_key');
+  Future<void> _checkSavedApiKey() async {
+    final prefs = await SharedPreferences.getInstance();
+    final savedKey = prefs.getString('groq_api_key');
     if (savedKey != null && savedKey.isNotEmpty) {
-      // కీ ఇప్పటికే ఉంటే నేరుగా హోమ్ స్క్రీన్‌కి వెళ్ళిపోదాం
-      Navigator.pushReplacement(
-        context,
-        MaterialPageRoute(builder: (context) => BujjiHomeScreen(groqApiKey: savedKey)),
-      );
-    } else {
-      setState(() => _isLoading = false);
+      _navigateToMain(savedKey);
     }
   }
 
-  void _saveKey() async {
-    String key = _keyController.text.trim();
+  void _saveAndProceed() async {
+    final key = _apiKeyController.text.trim();
     if (key.isNotEmpty) {
-      SharedPreferences prefs = await SharedPreferences.getInstance();
+      final prefs = await SharedPreferences.getInstance();
       await prefs.setString('groq_api_key', key);
-      Navigator.pushReplacement(
-        context,
-        MaterialPageRoute(builder: (context) => BujjiHomeScreen(groqApiKey: key)),
-      );
-    } else {
-      ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(content: Text("దయచేసి సరైన Groq API Key ఇవ్వండి బాలా!")),
-      );
+      _navigateToMain(key);
     }
+  }
+
+  void _navigateToMain(String key) {
+    Navigator.of(context).pushReplacement(
+      MaterialPageRoute(builder: (context) => BujjiHomeScreen(apiKey: key)),
+    );
   }
 
   @override
   Widget build(BuildContext context) {
-    if (_isLoading) {
-      return const Scaffold(
-        body: Center(child: CircularProgressIndicator()),
-      );
-    }
-
     return Scaffold(
-      appBar: AppBar(title: const Text('BUJJI - Setup Key'), centerTitle: true),
-      body: Padding(
-        padding: const EdgeInsets.all(20.0),
-        child: Column(
-          mainAxisAlignment: MainAxisAlignment.center,
-          children: [
-            const Text(
-              "నీ Groq API Key ఇక్కడ ఎంటర్ చేయి బాలా!",
-              style: TextStyle(fontSize: 18, fontWeight: FontWeight.bold),
-              textAlign: TextAlign.center,
-            ),
-            const SizedBox(height: 20),
-            TextField(
-              controller: _keyController,
-              decoration: InputDecoration(
-                border: OutlineInputBorder(borderRadius: BorderRadius.circular(10)),
-                labelText: 'Groq API Key',
-                hintText: 'gsk_... ఇచ్చేయి',
+      body: Center(
+        child: Padding(
+          padding: const EdgeInsets.all(24.0),
+          child: Column(
+            mainAxisAlignment: MainAxisAlignment.center,
+            children: [
+              const Text(
+                'BUJJI AI',
+                style: TextStyle(fontSize: 28, fontWeight: FontWeight.bold, color: Colors.cyanAccent),
               ),
-            ),
-            const SizedBox(height: 30),
-            ElevatedButton(
-              onPressed: _saveKey,
-              style: ElevatedButton.styleFrom(
-                backgroundColor: Colors.cyanAccent,
-                foregroundColor: Colors.black,
-                padding: const EdgeInsets.symmetric(horizontal: 40, vertical: 15),
+              const SizedBox(height: 20),
+              TextField(
+                controller: _apiKeyController,
+                decoration: const InputDecoration(
+                  labelText: 'Enter Groq API Key',
+                  border: OutlineInputBorder(),
+                ),
               ),
-              child: const Text('START BUJJI', style: TextStyle(fontSize: 16, fontWeight: FontWeight.bold)),
-            ),
-          ],
+              const SizedBox(height: 20),
+              ElevatedButton(
+                onPressed: _saveAndProceed,
+                child: const Text('Save & Start'),
+              ),
+            ],
+          ),
         ),
       ),
     );
   }
 }
 
-// -------------------------------------------------------------
-// 2. అసలైన బుజ్జి హోమ్ స్క్రీన్ (రోబోట్ ఫేస్ & వాయిస్)
-// -------------------------------------------------------------
 class BujjiHomeScreen extends StatefulWidget {
-  final String groqApiKey;
-  const BujjiHomeScreen({super.key, required this.groqApiKey});
+  final String apiKey;
+  const BujjiHomeScreen({super.key, required this.apiKey});
 
   @override
   State<BujjiHomeScreen> createState() => _BujjiHomeScreenState();
 }
 
 class _BujjiHomeScreenState extends State<BujjiHomeScreen> {
-  final stt.SpeechToText _speech = stt.SpeechToText();
-  final FlutterTts _tts = FlutterTts();
+  late stt.SpeechToText _speech;
+  late FlutterTts _flutterTts;
 
-  bool _isAwake = false;
-  bool _isSpeaking = false;
-  String _statusText = "బుజ్జి నిద్రపోతోంది... 'Hi Bujji' అని పిలు బాలా!";
-  
+  bool _isListening = false;
+  bool _isSleepMode = false;
+  String _statusText = "లేచేశా బాలా!";
   Timer? _sleepTimer;
+
+  final List<Map<String, String>> _messages = [];
 
   @override
   void initState() {
     super.initState();
-    _initSpeechAndTts();
+    _speech = stt.SpeechToText();
+    _flutterTts = FlutterTts();
+    _initTts();
+    _initSpeech();
+    _resetSleepTimer();
   }
 
-  void _initSpeechAndTts() async {
-    await _tts.setLanguage("te-IN");
-    await _tts.setPitch(1.2);
-    await _tts.setSpeechRate(0.9);
+  Future<void> _initTts() async {
+    await _flutterTts.setLanguage("te-IN");
+    // స్పీడ్ తగ్గించి సాధారణ సంభాషణ వేగానికి పెట్టాం
+    await _flutterTts.setSpeechRate(0.45);
+    await _flutterTts.setPitch(1.1);
 
-    _tts.setCompletionHandler(() {
-      setState(() => _isSpeaking = false);
-      if (_isAwake) {
+    _flutterTts.setCompletionHandler(() {
+      if (!_isSleepMode) {
         _startListening();
       }
     });
+  }
 
-    bool available = await _speech.initialize(
-      onError: (val) => print('onError: $val'),
-      onStatus: (val) {
-        if (val == 'done' && _isAwake && !_isSpeaking) {
-          _startListening();
+  Future<void> _initSpeech() async {
+    await _speech.initialize(
+      onStatus: (status) {
+        if (status == 'notListening') {
+          setState(() {
+            _isListening = false;
+          });
+          if (_isSleepMode) {
+            _startWakeWordListening();
+          }
+        }
+      },
+      onError: (errorNotification) {
+        if (_isSleepMode) {
+          _startWakeWordListening();
         }
       },
     );
-
-    if (available) {
-      _startListening();
-    }
   }
 
   void _resetSleepTimer() {
     _sleepTimer?.cancel();
     _sleepTimer = Timer(const Duration(seconds: 30), () {
-      if (_isAwake) {
-        _goToSleep();
-      }
+      _enterSleepMode();
     });
   }
 
-  void _wakeUp(String greeting) async {
+  void _enterSleepMode() {
+    _flutterTts.stop();
+    _speech.stop();
     setState(() {
-      _isAwake = true;
-      _statusText = greeting;
+      _isSleepMode = true;
+      _statusText = "పడుకున్నా బాలా... ('Hi Bujji' అను)";
+    });
+    _startWakeWordListening();
+  }
+
+  void _wakeUp() {
+    _speech.stop();
+    setState(() {
+      _isSleepMode = false;
+      _statusText = "లేచేశా బాలా!";
     });
     _resetSleepTimer();
-    await _speak(greeting);
+    _speak("హలో బాలా! లేచేశాను, చెప్పు ఏమిటి విశేషాలు?");
   }
 
-  void _goToSleep() async {
-    _sleepTimer?.cancel();
-    setState(() {
-      _isAwake = false;
-      _statusText = "బుజ్జి నిద్రపోతోంది... 'Hi Bujji' అని పిలు బాలా!";
-    });
-    await _speak("సరే బాలా, నేను చిన్న కునుకు తీస్తున్నా!");
-  }
-
-  void _startListening() async {
-    if (!_speech.isListening && !_isSpeaking) {
-      await _speech.listen(
-        onResult: (val) {
-          String text = val.recognizedWords.toLowerCase();
-          if (text.isNotEmpty) {
-            _handleUserSpeech(text);
+  void _startWakeWordListening() {
+    if (_isSleepMode && !_speech.isListening) {
+      _speech.listen(
+        onResult: (result) {
+          String text = result.recognizedWords.toLowerCase();
+          if (text.contains("bujji") || text.contains("బుజ్జి") || text.contains("hi")) {
+            _wakeUp();
           }
         },
-        listenFor: const Duration(seconds: 10),
+        listenFor: const Duration(seconds: 30),
         pauseFor: const Duration(seconds: 3),
+        partialResults: true,
+        listenMode: stt.ListenMode.dictation,
       );
     }
   }
 
-  void _handleUserSpeech(String text) {
+  void _startListening() async {
+    if (_isSleepMode) return;
     _resetSleepTimer();
 
-    if (!_isAwake) {
-      if (text.contains("bujji") || text.contains("బుజ్జి") || text.contains("hi") || text.contains("oy")) {
-        _wakeUp("లేచేశా బాలా! చెప్పు ఏంటి విశేషాలు?");
+    if (!_speech.isListening) {
+      bool available = await _speech.initialize();
+      if (available) {
+        setState(() => _isListening = true);
+        _speech.listen(
+          onResult: (result) {
+            if (result.finalResult) {
+              setState(() => _isListening = false);
+              _processUserQuery(result.recognizedWords);
+            }
+          },
+          listenFor: const Duration(seconds: 10),
+          pauseFor: const Duration(seconds: 3),
+        );
       }
-      return;
     }
-
-    _getGroqResponse(text);
   }
 
-  Future<void> _getGroqResponse(String prompt) async {
-    setState(() => _statusText = "ఆలోచిస్తున్నా బాలా...");
-    
+  Future<void> _processUserQuery(String userText) async {
+    if (userText.trim().isEmpty) return;
+
+    _resetSleepTimer();
+    setState(() {
+      _messages.add({"role": "user", "content": userText});
+      _statusText = "ఆలోచిస్తున్నా బాలా...";
+    });
+
+    String responseText = await _getGroqResponse(userText);
+
+    setState(() {
+      _messages.add({"role": "assistant", "content": responseText});
+      _statusText = responseText;
+    });
+
+    _speak(responseText);
+  }
+
+  Future<String> _getGroqResponse(String userText) async {
     try {
       final response = await http.post(
         Uri.parse('https://api.groq.com/openai/v1/chat/completions'),
         headers: {
-          'Authorization': 'Bearer ${widget.groqApiKey}',
+          'Authorization': 'Bearer ${widget.apiKey}',
           'Content-Type': 'application/json',
         },
         body: jsonEncode({
-          'model': 'llama-3.3-70b-versatile',
-          'messages': [
+          "model": "llama-3.3-70b-versatile",
+          "messages": [
             {
-              'role': 'system',
-              'content': 'Your name is Bujji. You are a witty, playful AI assistant speaking in Telugu with your creator Bala. Keep responses short and friendly.'
+              "role": "system",
+              "content": "You are Bujji, a funny, witty, Telugu speaking AI robot friend created by Bala. Speak naturally in simple conversational Telugu script with humor."
             },
-            {'role': 'user', 'content': prompt}
+            ..._messages
           ],
         }),
       );
 
       if (response.statusCode == 200) {
-        var data = jsonDecode(response.body);
-        String reply = data['choices'][0]['message']['content'];
-        setState(() => _statusText = reply);
-        await _speak(reply);
+        final data = jsonDecode(utf8.decode(response.bodyBytes));
+        return data['choices'][0]['message']['content'];
       } else {
-        setState(() => _statusText = "చిన్న ఎర్రర్ వచ్చింది బాలా, కీ సరిచూడు!");
+        return "అయ్యో బాలా! చిన్న సమస్య వచ్చింది.";
       }
     } catch (e) {
-      setState(() => _statusText = "నెట్‌వర్క్ చెక్ చేసుకో బాలా!");
+      return "నెట్‌వర్క్ చెక్ చేసుకో బాలా!";
     }
   }
 
-  Future<void> _speak(String text) async {
-    setState(() => _isSpeaking = true);
-    await _speech.stop();
-    await _tts.speak(text);
+  void _speak(String text) async {
+    await _flutterTts.stop();
+    await _flutterTts.speak(text);
+  }
+
+  @override
+  void dispose() {
+    _sleepTimer?.cancel();
+    _speech.stop();
+    _flutterTts.stop();
+    super.dispose();
   }
 
   @override
   Widget build(BuildContext context) {
     return Scaffold(
-      appBar: AppBar(
-        title: const Text('BUJJI AI'),
-        centerTitle: true,
-      ),
-      body: Center(
+      backgroundColor: Colors.black,
+      body: SafeArea(
         child: Column(
-          mainAxisAlignment: MainAxisAlignment.center,
           children: [
-            Container(
-              width: 200,
-              height: 200,
-              decoration: BoxDecoration(
-                shape: BoxShape.circle,
-                border: Border.all(color: _isAwake ? Colors.cyanAccent : Colors.grey, width: 4),
-              ),
-              child: Row(
-                mainAxisAlignment: MainAxisAlignment.spaceEvenly,
-                children: [
-                  Container(
-                    width: _isAwake ? 35 : 30,
-                    height: _isAwake ? 35 : 6,
-                    decoration: BoxDecoration(
-                      color: _isAwake ? Colors.cyanAccent : Colors.cyan,
-                      borderRadius: BorderRadius.circular(20),
-                    ),
+            const SizedBox(height: 20),
+            const Text(
+              'BUJJI AI',
+              style: TextStyle(fontSize: 22, fontWeight: FontWeight.bold, color: Colors.white70),
+            ),
+            const Spacer(),
+            Center(
+              child: GestureDetector(
+                onTap: () {
+                  if (_isSleepMode) {
+                    _wakeUp();
+                  } else {
+                    _startListening();
+                  }
+                },
+                child: Container(
+                  width: 220,
+                  height: 220,
+                  decoration: BoxDecoration(
+                    shape: BoxShape.circle,
+                    border: Border.all(color: _isSleepMode ? Colors.grey : Colors.cyanAccent, width: 4),
                   ),
-                  Container(
-                    width: _isAwake ? 35 : 30,
-                    height: _isAwake ? 35 : 6,
-                    decoration: BoxDecoration(
-                      color: _isAwake ? Colors.cyanAccent : Colors.cyan,
-                      borderRadius: BorderRadius.circular(20),
-                    ),
+                  child: Row(
+                    mainAxisAlignment: MainAxisAlignment.center,
+                    children: [
+                      CircleAvatar(radius: _isSleepMode ? 4 : 12, backgroundColor: Colors.cyanAccent),
+                      const SizedBox(width: 40),
+                      CircleAvatar(radius: _isSleepMode ? 4 : 12, backgroundColor: Colors.cyanAccent),
+                    ],
                   ),
-                ],
+                ),
               ),
             ),
             const SizedBox(height: 30),
             Padding(
-              padding: const EdgeInsets.symmetric(horizontal: 20),
-              child: Container(
-                padding: const EdgeInsets.all(15),
-                decoration: BoxDecoration(
-                  color: Colors.blueGrey.shade900,
-                  borderRadius: BorderRadius.circular(15),
-                ),
-                child: Text(
-                  _statusText,
-                  textAlign: TextAlign.center,
-                  style: const TextStyle(fontSize: 18, fontWeight: FontWeight.bold),
-                ),
+              padding: const EdgeInsets.symmetric(horizontal: 20.0),
+              child: Text(
+                _statusText,
+                textAlign: TextAlign.center,
+                style: const TextStyle(fontSize: 18, color: Colors.white),
               ),
             ),
-            const SizedBox(height: 40),
-            Row(
-              mainAxisAlignment: MainAxisAlignment.center,
-              children: [
-                ElevatedButton.icon(
-                  onPressed: () => _isAwake ? _goToSleep() : _wakeUp("లేచేశా బాలా!"),
-                  icon: Icon(_isAwake ? Icons.bedtime : Icons.power_settings_new),
-                  label: Text(_isAwake ? "SLEEP" : "WAKE BUJJI"),
-                  style: ElevatedButton.styleFrom(
-                    backgroundColor: _isAwake ? Colors.grey : Colors.amber,
-                    padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 12),
-                  ),
-                ),
-              ],
+            const Spacer(),
+            ElevatedButton.icon(
+              onPressed: () {
+                if (_isSleepMode) {
+                  _wakeUp();
+                } else {
+                  _enterSleepMode();
+                }
+              },
+              icon: Icon(_isSleepMode ? Icons.wb_sunny : Icons.nightlight_round),
+              label: Text(_isSleepMode ? "WAKE UP" : "SLEEP"),
+              style: ElevatedButton.styleFrom(
+                backgroundColor: Colors.grey[800],
+                foregroundColor: Colors.white,
+              ),
             ),
+            const SizedBox(height: 30),
           ],
         ),
       ),
