@@ -261,7 +261,7 @@ class _BujjiHomeScreenState extends State<BujjiHomeScreen> {
         setState(() => _isSpeaking = false);
       }
       if (!_isSleepMode) {
-        Future.delayed(const Duration(milliseconds: 400), () {
+        Future.delayed(const Duration(milliseconds: 600), () {
           if (mounted && !_isSpeaking && !_isSleepMode) {
             _startListening();
           }
@@ -276,9 +276,9 @@ class _BujjiHomeScreenState extends State<BujjiHomeScreen> {
         if (status == 'notListening' || status == 'done') {
           if (mounted) {
             setState(() => _isListening = false);
-            if (!_isSpeaking) {
-              Future.delayed(const Duration(milliseconds: 500), () {
-                if (mounted && !_isSpeaking) {
+            if (!_isSpeaking && !_isSleepMode) {
+              Future.delayed(const Duration(milliseconds: 800), () {
+                if (mounted && !_isSpeaking && !_isSleepMode) {
                   _startListening();
                 }
               });
@@ -289,9 +289,9 @@ class _BujjiHomeScreenState extends State<BujjiHomeScreen> {
       onError: (error) {
         if (mounted) {
           setState(() => _isListening = false);
-          if (!_isSpeaking) {
-            Future.delayed(const Duration(milliseconds: 1000), () {
-              if (mounted && !_isSpeaking) {
+          if (!_isSpeaking && !_isSleepMode) {
+            Future.delayed(const Duration(milliseconds: 1200), () {
+              if (mounted && !_isSpeaking && !_isSleepMode) {
                 _startListening();
               }
             });
@@ -335,7 +335,7 @@ class _BujjiHomeScreenState extends State<BujjiHomeScreen> {
     _speak("హలో బాలా! లేచేశాను, చెప్పు ఏమిటి విశేషాలు?");
   }
 
-  // Wake Word Listener for Sleep Mode
+  // Wake Word Listener for Sleep Mode (Super Working!)
   void _startWakeWordListening() async {
     if (!_isSleepMode || _isSpeaking) return;
 
@@ -384,6 +384,8 @@ class _BujjiHomeScreenState extends State<BujjiHomeScreen> {
   }
 
   void _startListening() async {
+    if (_isSleepMode) return;
+
     if (_isSpeaking) {
       await _flutterTts.stop();
       if (mounted) setState(() => _isSpeaking = false);
@@ -397,32 +399,22 @@ class _BujjiHomeScreenState extends State<BujjiHomeScreen> {
       if (mounted) {
         setState(() {
           _isListening = true;
-          _statusText = _isSleepMode ? "పడుకున్నా బాలా... ('Hi Bujji' అను)" : "వింటున్నా బాలా...";
+          _statusText = "వింటున్నా బాలా... మాట్లాడు!";
         });
       }
 
+      // Fixed: Normal Listening - Long Time & Patient Listening
       _speech.listen(
         onResult: (result) {
-          if (_isSleepMode) {
-            String text = result.recognizedWords.toLowerCase();
-            if (text.contains("bujji") ||
-                text.contains("బుజ్జి") ||
-                text.contains("hi") ||
-                text.contains("oy") ||
-                text.contains("bala") ||
-                text.contains("బాలా")) {
-              _wakeUp();
-            }
-          } else {
-            if (result.finalResult) {
-              if (mounted) setState(() => _isListening = false);
-              _processUserQuery(result.recognizedWords);
-            }
+          if (result.finalResult && result.recognizedWords.trim().isNotEmpty) {
+            if (mounted) setState(() => _isListening = false);
+            _processUserQuery(result.recognizedWords);
           }
         },
-        listenFor: const Duration(seconds: 15),
-        pauseFor: const Duration(seconds: 3),
+        listenFor: const Duration(seconds: 30), // 30 seconds uninterrupted
+        pauseFor: const Duration(seconds: 6),  // 6 seconds gap allowed
         localeId: "te_IN",
+        listenMode: stt.ListenMode.dictation,
       );
     }
   }
