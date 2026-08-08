@@ -234,8 +234,7 @@ class _BujjiHomeScreenState extends State<BujjiHomeScreen> {
   bool _isListening = false;
   bool _isSpeaking = false;
   bool _isSleepMode = false;
-  String _statusText = "లేచేశా బాలా!";
-  Timer? _sleepTimer;
+  String _statusText = "లేచేశా బాలా! మాట్లాడు...";
 
   final List<Map<String, String>> _messages = [];
 
@@ -244,26 +243,23 @@ class _BujjiHomeScreenState extends State<BujjiHomeScreen> {
     super.initState();
     _initTts();
     _initSpeechOnce();
-    _resetSleepTimer();
   }
 
   Future<void> _initTts() async {
     await _flutterTts.setLanguage("te-IN");
-    await _flutterTts.setSpeechRate(0.58); // Speed natural ga penchanu
+    await _flutterTts.setSpeechRate(0.58);
     await _flutterTts.setPitch(1.1);
 
     _flutterTts.setStartHandler(() {
       if (mounted) {
         setState(() => _isSpeaking = true);
       }
-      _sleepTimer?.cancel();
     });
 
     _flutterTts.setCompletionHandler(() {
       if (mounted) {
         setState(() => _isSpeaking = false);
       }
-      _resetSleepTimer();
       if (!_isSleepMode) {
         Future.delayed(const Duration(milliseconds: 400), () {
           if (mounted && !_isSpeaking && !_isSleepMode) {
@@ -280,10 +276,10 @@ class _BujjiHomeScreenState extends State<BujjiHomeScreen> {
         if (status == 'notListening' || status == 'done') {
           if (mounted) {
             setState(() => _isListening = false);
-            if (_isSleepMode && !_isSpeaking) {
-              Future.delayed(const Duration(milliseconds: 800), () {
-                if (mounted && _isSleepMode && !_isSpeaking) {
-                  _startWakeWordListening();
+            if (!_isSpeaking) {
+              Future.delayed(const Duration(milliseconds: 500), () {
+                if (mounted && !_isSpeaking) {
+                  _startListening();
                 }
               });
             }
@@ -293,10 +289,10 @@ class _BujjiHomeScreenState extends State<BujjiHomeScreen> {
       onError: (error) {
         if (mounted) {
           setState(() => _isListening = false);
-          if (_isSleepMode && !_isSpeaking) {
-            Future.delayed(const Duration(milliseconds: 800), () {
-              if (mounted && _isSleepMode && !_isSpeaking) {
-                _startWakeWordListening();
+          if (!_isSpeaking) {
+            Future.delayed(const Duration(milliseconds: 1000), () {
+              if (mounted && !_isSpeaking) {
+                _startListening();
               }
             });
           }
@@ -306,17 +302,6 @@ class _BujjiHomeScreenState extends State<BujjiHomeScreen> {
     if (_isSpeechInitialized && mounted) {
       _startListening();
     }
-  }
-
-  void _resetSleepTimer() {
-    _sleepTimer?.cancel();
-    if (_isSpeaking || _isSleepMode) return;
-
-    _sleepTimer = Timer(const Duration(seconds: 30), () {
-      if (!_isSpeaking && mounted) {
-        _enterSleepMode();
-      }
-    });
   }
 
   void _enterSleepMode() {
@@ -347,11 +332,10 @@ class _BujjiHomeScreenState extends State<BujjiHomeScreen> {
         _statusText = "లేచేశా బాలా!";
       });
     }
-    _resetSleepTimer();
     _speak("హలో బాలా! లేచేశాను, చెప్పు ఏమిటి విశేషాలు?");
   }
 
-  // Wake Word Listening for "Hi Bujji", "Oy Bujji", "Bujji", "Bala"
+  // Wake Word Listener for Sleep Mode
   void _startWakeWordListening() async {
     if (!_isSleepMode || _isSpeaking) return;
 
@@ -374,15 +358,13 @@ class _BujjiHomeScreenState extends State<BujjiHomeScreen> {
             _wakeUp();
           }
         },
-        listenFor: const Duration(seconds: 20),
-        pauseFor: const Duration(seconds: 3),
-        listenMode: stt.ListenMode.dictation,
+        listenFor: const Duration(seconds: 30),
+        pauseFor: const Duration(seconds: 2),
         partialResults: true,
       );
     }
   }
 
-  // Gemini Live Interrupt Feature
   void _handleUserTap() async {
     if (_isSleepMode) {
       _wakeUp();
@@ -391,9 +373,7 @@ class _BujjiHomeScreenState extends State<BujjiHomeScreen> {
 
     if (_isSpeaking) {
       await _flutterTts.stop();
-      setState(() {
-        _isSpeaking = false;
-      });
+      if (mounted) setState(() => _isSpeaking = false);
       _startListening();
       return;
     }
@@ -404,11 +384,9 @@ class _BujjiHomeScreenState extends State<BujjiHomeScreen> {
   }
 
   void _startListening() async {
-    if (_isSleepMode) return;
-
     if (_isSpeaking) {
       await _flutterTts.stop();
-      setState(() => _isSpeaking = false);
+      if (mounted) setState(() => _isSpeaking = false);
     }
 
     if (!_isSpeechInitialized) {
@@ -416,32 +394,42 @@ class _BujjiHomeScreenState extends State<BujjiHomeScreen> {
     }
 
     if (_isSpeechInitialized && !_speech.isListening) {
-      setState(() {
-        _isListening = true;
-        _statusText = "వింటున్నా బాలా...";
-      });
+      if (mounted) {
+        setState(() {
+          _isListening = true;
+          _statusText = _isSleepMode ? "పడుకున్నా బాలా... ('Hi Bujji' అను)" : "వింటున్నా బాలా...";
+        });
+      }
 
       _speech.listen(
         onResult: (result) {
-          if (result.finalResult) {
-            setState(() => _isListening = false);
-            _processUserQuery(result.recognizedWords);
+          if (_isSleepMode) {
+            String text = result.recognizedWords.toLowerCase();
+            if (text.contains("bujji") ||
+                text.contains("బుజ్జి") ||
+                text.contains("hi") ||
+                text.contains("oy") ||
+                text.contains("bala") ||
+                text.contains("బాలా")) {
+              _wakeUp();
+            }
+          } else {
+            if (result.finalResult) {
+              if (mounted) setState(() => _isListening = false);
+              _processUserQuery(result.recognizedWords);
+            }
           }
         },
-        listenFor: const Duration(seconds: 12),
-        pauseFor: const Duration(seconds: 4),
+        listenFor: const Duration(seconds: 15),
+        pauseFor: const Duration(seconds: 3),
         localeId: "te_IN",
       );
     }
   }
 
   Future<void> _processUserQuery(String userText) async {
-    if (userText.trim().isEmpty) {
-      _resetSleepTimer();
-      return;
-    }
+    if (userText.trim().isEmpty) return;
 
-    _resetSleepTimer();
     if (mounted) {
       setState(() {
         _messages.add({"role": "user", "content": userText});
@@ -496,7 +484,6 @@ class _BujjiHomeScreenState extends State<BujjiHomeScreen> {
 
   @override
   void dispose() {
-    _sleepTimer?.cancel();
     _speech.stop();
     _flutterTts.stop();
     super.dispose();
