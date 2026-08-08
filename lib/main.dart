@@ -25,7 +25,7 @@ class BujjiApp extends StatelessWidget {
   }
 }
 
-// 1. API Key Setup Screen
+// 1. API Key & Settings Setup Screen
 class ApiKeyCheckScreen extends StatefulWidget {
   const ApiKeyCheckScreen({super.key});
 
@@ -234,7 +234,8 @@ class _BujjiHomeScreenState extends State<BujjiHomeScreen> {
   bool _isListening = false;
   bool _isSpeaking = false;
   bool _isSleepMode = false;
-  String _statusText = "లేచేశా బాలా! మాట్లాడు...";
+  String _statusText = "లేచేశా బాలా!";
+  Timer? _sleepTimer;
 
   final List<Map<String, String>> _messages = [];
 
@@ -243,25 +244,28 @@ class _BujjiHomeScreenState extends State<BujjiHomeScreen> {
     super.initState();
     _initTts();
     _initSpeechOnce();
+    _resetSleepTimer();
   }
 
   Future<void> _initTts() async {
     await _flutterTts.setLanguage("te-IN");
-    await _flutterTts.setSpeechRate(0.58);
+    await _flutterTts.setSpeechRate(0.45);
     await _flutterTts.setPitch(1.1);
 
     _flutterTts.setStartHandler(() {
       if (mounted) {
         setState(() => _isSpeaking = true);
       }
+      _sleepTimer?.cancel();
     });
 
     _flutterTts.setCompletionHandler(() {
       if (mounted) {
         setState(() => _isSpeaking = false);
       }
+      _resetSleepTimer();
       if (!_isSleepMode) {
-        Future.delayed(const Duration(milliseconds: 600), () {
+        Future.delayed(const Duration(milliseconds: 500), () {
           if (mounted && !_isSpeaking && !_isSleepMode) {
             _startListening();
           }
@@ -276,32 +280,29 @@ class _BujjiHomeScreenState extends State<BujjiHomeScreen> {
         if (status == 'notListening' || status == 'done') {
           if (mounted) {
             setState(() => _isListening = false);
-            if (!_isSpeaking && !_isSleepMode) {
-              Future.delayed(const Duration(milliseconds: 800), () {
-                if (mounted && !_isSpeaking && !_isSleepMode) {
-                  _startListening();
-                }
-              });
-            }
           }
         }
       },
       onError: (error) {
         if (mounted) {
           setState(() => _isListening = false);
-          if (!_isSpeaking && !_isSleepMode) {
-            Future.delayed(const Duration(milliseconds: 1200), () {
-              if (mounted && !_isSpeaking && !_isSleepMode) {
-                _startListening();
-              }
-            });
-          }
         }
       },
     );
     if (_isSpeechInitialized && mounted) {
       _startListening();
     }
+  }
+
+  void _resetSleepTimer() {
+    _sleepTimer?.cancel();
+    if (_isSpeaking || _isSleepMode) return;
+
+    _sleepTimer = Timer(const Duration(seconds: 30), () {
+      if (!_isSpeaking && mounted) {
+        _enterSleepMode();
+      }
+    });
   }
 
   void _enterSleepMode() {
@@ -311,10 +312,10 @@ class _BujjiHomeScreenState extends State<BujjiHomeScreen> {
       setState(() {
         _isSleepMode = true;
         _isListening = false;
-        _isSpeaking = false;
         _statusText = "పడుకున్నా బాలా... ('Hi Bujji' లేదా 'Oy Bujji' అను)";
       });
     }
+    // Start listening for Wake Word in Sleep Mode
     Future.delayed(const Duration(milliseconds: 500), () {
       if (mounted && _isSleepMode) {
         _startWakeWordListening();
@@ -332,10 +333,11 @@ class _BujjiHomeScreenState extends State<BujjiHomeScreen> {
         _statusText = "లేచేశా బాలా!";
       });
     }
+    _resetSleepTimer();
     _speak("హలో బాలా! లేచేశాను, చెప్పు ఏమిటి విశేషాలు?");
   }
 
-  // Wake Word Listener for Sleep Mode (Super Working!)
+  // Code 2's Super Working Sleep Wakeup Logic
   void _startWakeWordListening() async {
     if (!_isSleepMode || _isSpeaking) return;
 
@@ -346,82 +348,62 @@ class _BujjiHomeScreenState extends State<BujjiHomeScreen> {
     if (_isSpeechInitialized && !_speech.isListening) {
       _speech.listen(
         onResult: (result) {
-          String text = result.recognizedWords.toLowerCase();
-          if (text.contains("bujji") ||
-              text.contains("బుజ్జి") ||
-              text.contains("hi bujji") ||
-              text.contains("oy bujji") ||
-              text.contains("hi") ||
-              text.contains("oy") ||
-              text.contains("bala") ||
-              text.contains("బాలా")) {
-            _wakeUp();
+          if (_isSleepMode) {
+            String text = result.recognizedWords.toLowerCase();
+            if (text.contains("bujji") ||
+                text.contains("బుజ్జి") ||
+                text.contains("hi bujji") ||
+                text.contains("oy bujji") ||
+                text.contains("hi") ||
+                text.contains("oy") ||
+                text.contains("bala") ||
+                text.contains("బాలా")) {
+              _wakeUp();
+            }
           }
         },
         listenFor: const Duration(seconds: 30),
-        pauseFor: const Duration(seconds: 2),
+        pauseFor: const Duration(seconds: 3),
         partialResults: true,
       );
     }
   }
 
-  void _handleUserTap() async {
-    if (_isSleepMode) {
-      _wakeUp();
-      return;
-    }
-
-    if (_isSpeaking) {
-      await _flutterTts.stop();
-      if (mounted) setState(() => _isSpeaking = false);
-      _startListening();
-      return;
-    }
-
-    if (!_isListening) {
-      _startListening();
-    }
-  }
-
+  // Code 1's Smooth & Perfect Normal Listening Logic
   void _startListening() async {
-    if (_isSleepMode) return;
-
-    if (_isSpeaking) {
-      await _flutterTts.stop();
-      if (mounted) setState(() => _isSpeaking = false);
-    }
+    if (_isSleepMode || _isSpeaking) return;
 
     if (!_isSpeechInitialized) {
       _isSpeechInitialized = await _speech.initialize();
     }
 
     if (_isSpeechInitialized && !_speech.isListening) {
-      if (mounted) {
-        setState(() {
-          _isListening = true;
-          _statusText = "వింటున్నా బాలా... మాట్లాడు!";
-        });
-      }
+      setState(() {
+        _isListening = true;
+        _statusText = "వింటున్నా బాలా...";
+      });
 
-      // Fixed: Normal Listening - Long Time & Patient Listening
       _speech.listen(
         onResult: (result) {
-          if (result.finalResult && result.recognizedWords.trim().isNotEmpty) {
-            if (mounted) setState(() => _isListening = false);
+          if (result.finalResult) {
+            setState(() => _isListening = false);
             _processUserQuery(result.recognizedWords);
           }
         },
-        listenFor: const Duration(seconds: 30), // 30 seconds uninterrupted
-        pauseFor: const Duration(seconds: 6),  // 6 seconds gap allowed
+        listenFor: const Duration(seconds: 12),
+        pauseFor: const Duration(seconds: 4),
         localeId: "te_IN",
-        listenMode: stt.ListenMode.dictation,
       );
     }
   }
 
   Future<void> _processUserQuery(String userText) async {
-    if (userText.trim().isEmpty) return;
+    if (userText.trim().isEmpty) {
+      _resetSleepTimer();
+      return;
+    }
 
+    _resetSleepTimer();
     if (mounted) {
       setState(() {
         _messages.add({"role": "user", "content": userText});
@@ -462,7 +444,7 @@ class _BujjiHomeScreenState extends State<BujjiHomeScreen> {
         final data = jsonDecode(utf8.decode(response.bodyBytes));
         return data['choices'][0]['message']['content'];
       } else {
-        return "అయ్యో బాలా! Groq సమస్య వచ్చింది (Code: ${response.statusCode}). కీ లేదా లిమిట్ సరిచూడు.";
+        return "అయ్యో బాలా! చిన్న సమస్య వచ్చింది, కీ సరిచూడు.";
       }
     } catch (e) {
       return "నెట్‌వర్క్ చెక్ చేసుకో బాలా!";
@@ -476,6 +458,7 @@ class _BujjiHomeScreenState extends State<BujjiHomeScreen> {
 
   @override
   void dispose() {
+    _sleepTimer?.cancel();
     _speech.stop();
     _flutterTts.stop();
     super.dispose();
@@ -511,7 +494,13 @@ class _BujjiHomeScreenState extends State<BujjiHomeScreen> {
             const Spacer(),
             Center(
               child: GestureDetector(
-                onTap: _handleUserTap,
+                onTap: () {
+                  if (_isSleepMode) {
+                    _wakeUp();
+                  } else if (!_isSpeaking) {
+                    _startListening();
+                  }
+                },
                 child: Container(
                   width: 220,
                   height: 220,
